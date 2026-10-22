@@ -8,17 +8,18 @@
 - На экране есть кнопки направлений, взлёта, посадки и остановки.
 - Кнопки пока показывают демонстрационное сообщение. Подключения по Wi-Fi и отправки команд дрону в этой версии нет.
 
-## Запуск
+## Android и APK
 
-Установите Flutter SDK, затем в корне проекта выполните:
+Проект предназначен только для Android. Установите Flutter SDK и Android SDK, затем в корне проекта выполните:
 
 ```bash
-flutter create --platforms=android,ios .
+flutter create --platforms=android .
 flutter pub get
 flutter run
+flutter build apk --release
 ```
 
-Команда `flutter create` добавит платформенные папки Flutter в этот минимальный проект. Для сборки iOS нужен macOS с Xcode.
+Готовый APK будет создан по пути `build/app/outputs/flutter-apk/app-release.apk`.
 
 ## План развития
 
