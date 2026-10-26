@@ -20,10 +20,3 @@ android/key.properties
 android/app/debug
 android/app/profile
 android/app/release
-
-# iOS build files
-ios/Flutter/.last_build_id
-ios/Pods/
-ios/.symlinks/
-ios/Flutter/ephemeral/
-ios/Runner.xcworkspace/xcuserdata/

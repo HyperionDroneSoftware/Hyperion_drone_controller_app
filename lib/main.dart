@@ -1,4 +1,7 @@
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/material.dart';
+import 'package:network_info_plus/network_info_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() => runApp(const HyperionApp());
 
@@ -23,17 +26,118 @@ class HyperionApp extends StatelessWidget {
       );
 }
 
-class ControllerScreen extends StatelessWidget {
+class ControllerScreen extends StatefulWidget {
   const ControllerScreen({super.key});
 
+  @override
+  State<ControllerScreen> createState() => _ControllerScreenState();
+}
+
+class _ControllerScreenState extends State<ControllerScreen>
+    with WidgetsBindingObserver {
   static const _muted = Color(0xFF9BAAC0);
 
-  void _demo(BuildContext context, String command) {
+  String? _wifiName;
+  String? _gateway;
+  bool _checkingWifi = false;
+  bool _waitingForSettings = false;
+  String? _wifiMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _waitingForSettings) {
+      _waitingForSettings = false;
+      _readWifiInfo();
+    }
+  }
+
+  Future<bool> _requestWifiPermission() async {
+    final permission = await Permission.locationWhenInUse.request();
+    if (permission.isGranted) return true;
+
+    if (mounted) {
+      setState(() {
+        _wifiMessage =
+            'Разрешите доступ к местоположению, чтобы Android показал имя Wi-Fi сети.';
+      });
+    }
+    return false;
+  }
+
+  Future<void> _readWifiInfo() async {
+    if (!await _requestWifiPermission()) return;
+    if (!mounted) return;
+
+    setState(() {
+      _checkingWifi = true;
+      _wifiMessage = null;
+    });
+
+    try {
+      final info = NetworkInfo();
+      final name = await info.getWifiName();
+      final gateway = await info.getWifiGatewayIP();
+      if (!mounted) return;
+
+      final cleanedName = name?.replaceAll('"', '').trim();
+      setState(() {
+        _wifiName = (cleanedName == null ||
+                cleanedName.isEmpty ||
+                cleanedName == '<unknown ssid>')
+            ? null
+            : cleanedName;
+        _gateway = gateway;
+        _checkingWifi = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _checkingWifi = false;
+        _wifiMessage =
+            'Не удалось прочитать сеть. Проверьте разрешение и включите службы геолокации Android.';
+      });
+    }
+  }
+
+  Future<void> _openWifiSettings() async {
+    if (!await _requestWifiPermission()) return;
+    if (!mounted) return;
+
+    setState(() {
+      _waitingForSettings = true;
+      _wifiMessage = null;
+    });
+
+    try {
+      const intent = AndroidIntent(action: 'android.settings.WIFI_SETTINGS');
+      await intent.launch();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _waitingForSettings = false;
+        _wifiMessage = 'Не получилось открыть настройки Wi-Fi на этом устройстве.';
+      });
+    }
+  }
+
+  void _showDemoMessage(String command) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text('«$command»: управление появится в следующей версии.'),
+          content: Text('«$command»: команды управления появятся в следующих версиях.'),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
         ),
@@ -54,9 +158,9 @@ class ControllerScreen extends StatelessWidget {
                       Container(
                         width: 46,
                         height: 46,
-                        decoration: BoxDecoration(
-                          color: const Color(0x293B82F6),
-                          borderRadius: BorderRadius.circular(15),
+                        decoration: const BoxDecoration(
+                          color: Color(0x293B82F6),
+                          borderRadius: BorderRadius.all(Radius.circular(15)),
                         ),
                         child: const Icon(Icons.flight, color: Color(0xFF3B82F6)),
                       ),
@@ -65,34 +169,30 @@ class ControllerScreen extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('HYPERION', style: TextStyle(fontSize: 12, letterSpacing: 2.4, color: _muted, fontWeight: FontWeight.w700)),
+                            Text('HYPERION',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    letterSpacing: 2.4,
+                                    color: _muted,
+                                    fontWeight: FontWeight.w700)),
                             SizedBox(height: 3),
-                            Text('Пульт управления', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                            Text('Пульт управления',
+                                style: TextStyle(
+                                    fontSize: 18, fontWeight: FontWeight.w700)),
                           ],
                         ),
                       ),
-                      const Text('v0.1', style: TextStyle(color: _muted, fontSize: 12)),
+                      const Text('v0.2', style: TextStyle(color: _muted, fontSize: 12)),
                     ],
                   ),
                   const SizedBox(height: 28),
-                  const _Panel(
-                    child: Row(
-                      children: [
-                        Icon(Icons.wifi_off_rounded, color: Color(0xFFFFB454), size: 23),
-                        SizedBox(width: 13),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Дрон не подключён', style: TextStyle(fontWeight: FontWeight.w700)),
-                              SizedBox(height: 4),
-                              Text('Подключение появится в следующем этапе', style: TextStyle(color: _muted, fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                        Icon(Icons.circle, color: Color(0xFFFFB454), size: 9),
-                      ],
-                    ),
+                  _WifiCard(
+                    name: _wifiName,
+                    gateway: _gateway,
+                    checking: _checkingWifi,
+                    message: _wifiMessage,
+                    onConnect: _openWifiSettings,
+                    onRefresh: _readWifiInfo,
                   ),
                   const SizedBox(height: 14),
                   const _Panel(
@@ -100,12 +200,16 @@ class ControllerScreen extends StatelessWidget {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.info_outline, color: Color(0xFF74AAFF), size: 19),
+                        Icon(Icons.info_outline,
+                            color: Color(0xFF74AAFF), size: 19),
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Это первая версия экрана. Кнопки показывают отклик, но пока не отправляют команды дрону.',
-                            style: TextStyle(color: Color(0xFFD3E3FA), fontSize: 12, height: 1.45),
+                            'Версия 0.2 проверяет подключение телефона к Wi-Fi сети. Управление моторами пока не включено.',
+                            style: TextStyle(
+                                color: Color(0xFFD3E3FA),
+                                fontSize: 12,
+                                height: 1.45),
                           ),
                         ),
                       ],
@@ -118,16 +222,28 @@ class ControllerScreen extends StatelessWidget {
                     padding: const EdgeInsets.all(18),
                     child: Column(
                       children: [
-                        _DirectionButton(icon: Icons.keyboard_arrow_up, label: 'Вперёд', onPressed: (s) => _demo(context, s)),
+                        _DirectionButton(
+                            icon: Icons.keyboard_arrow_up,
+                            label: 'Вперёд',
+                            onPressed: _showDemoMessage),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            _DirectionButton(icon: Icons.keyboard_arrow_left, label: 'Влево', onPressed: (s) => _demo(context, s)),
+                            _DirectionButton(
+                                icon: Icons.keyboard_arrow_left,
+                                label: 'Влево',
+                                onPressed: _showDemoMessage),
                             const SizedBox(width: 68, height: 60),
-                            _DirectionButton(icon: Icons.keyboard_arrow_right, label: 'Вправо', onPressed: (s) => _demo(context, s)),
+                            _DirectionButton(
+                                icon: Icons.keyboard_arrow_right,
+                                label: 'Вправо',
+                                onPressed: _showDemoMessage),
                           ],
                         ),
-                        _DirectionButton(icon: Icons.keyboard_arrow_down, label: 'Назад', onPressed: (s) => _demo(context, s)),
+                        _DirectionButton(
+                            icon: Icons.keyboard_arrow_down,
+                            label: 'Назад',
+                            onPressed: _showDemoMessage),
                       ],
                     ),
                   ),
@@ -136,28 +252,44 @@ class ControllerScreen extends StatelessWidget {
                   const SizedBox(height: 13),
                   Row(
                     children: [
-                      Expanded(child: _ActionButton(icon: Icons.flight_takeoff, label: 'Взлёт', onPressed: () => _demo(context, 'Взлёт'))),
+                      Expanded(
+                        child: _ActionButton(
+                            icon: Icons.flight_takeoff,
+                            label: 'Взлёт',
+                            onPressed: () => _showDemoMessage('Взлёт')),
+                      ),
                       const SizedBox(width: 12),
-                      Expanded(child: _ActionButton(icon: Icons.flight_land, label: 'Посадка', onPressed: () => _demo(context, 'Посадка'))),
+                      Expanded(
+                        child: _ActionButton(
+                            icon: Icons.flight_land,
+                            label: 'Посадка',
+                            onPressed: () => _showDemoMessage('Посадка')),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
                     height: 52,
                     child: OutlinedButton.icon(
-                      onPressed: () => _demo(context, 'Стоп'),
+                      onPressed: () => _showDemoMessage('Стоп'),
                       icon: const Icon(Icons.stop_circle_outlined),
                       label: const Text('Аварийная остановка'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFFFF7B83),
                         side: const BorderSide(color: Color(0x66FF7B83)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
                       ),
                     ),
                   ),
                   const SizedBox(height: 24),
                   const Center(
-                    child: Text('ПРОТОТИП ИНТЕРФЕЙСА · ПОДКЛЮЧЕНИЯ НЕТ', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, letterSpacing: 1.1, color: _muted)),
+                    child: Text(
+                      'СНАЧАЛА ПОДКЛЮЧИТЕСЬ К СЕТИ ДРОНА',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 10, letterSpacing: 1.1, color: _muted),
+                    ),
                   ),
                 ],
               ),
@@ -167,8 +299,105 @@ class ControllerScreen extends StatelessWidget {
       );
 }
 
+class _WifiCard extends StatelessWidget {
+  const _WifiCard({
+    required this.name,
+    required this.gateway,
+    required this.checking,
+    required this.message,
+    required this.onConnect,
+    required this.onRefresh,
+  });
+
+  final String? name;
+  final String? gateway;
+  final bool checking;
+  final String? message;
+  final VoidCallback onConnect;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final connected = name != null;
+    return _Panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                connected ? Icons.wifi_rounded : Icons.wifi_off_rounded,
+                color: connected
+                    ? const Color(0xFF62D69A)
+                    : const Color(0xFFFFB454),
+                size: 23,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  connected ? 'Телефон подключён к Wi-Fi' : 'Нет Wi-Fi сети',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              if (checking)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            connected ? name! : 'Выберите Wi-Fi сеть квадрокоптера',
+            style: const TextStyle(color: Color(0xFFB7C7DC), fontSize: 13),
+          ),
+          if (gateway != null) ...[
+            const SizedBox(height: 4),
+            Text('Шлюз: $gateway',
+                style: const TextStyle(color: Color(0xFF9BAAC0), fontSize: 12)),
+          ],
+          if (message != null) ...[
+            const SizedBox(height: 10),
+            Text(message!,
+                style: const TextStyle(
+                    color: Color(0xFFFFB454), fontSize: 12, height: 1.4)),
+          ],
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: checking ? null : onConnect,
+                  icon: const Icon(Icons.settings_wifi_rounded, size: 18),
+                  label: Text(connected ? 'Сменить сеть' : 'Подключить Wi-Fi'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              IconButton.outlined(
+                tooltip: 'Проверить сеть',
+                onPressed: checking ? null : onRefresh,
+                icon: const Icon(Icons.refresh_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'В настройках Android выберите сеть дрона, затем вернитесь сюда.',
+            style: TextStyle(color: Color(0xFF9BAAC0), fontSize: 11, height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _Panel extends StatelessWidget {
-  const _Panel({required this.child, this.color = const Color(0xFF111C2B), this.padding = const EdgeInsets.all(18)});
+  const _Panel({
+    required this.child,
+    this.color = const Color(0xFF111C2B),
+    this.padding = const EdgeInsets.all(18),
+  });
 
   final Widget child;
   final Color color;
@@ -193,12 +422,20 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
         text,
-        style: const TextStyle(fontSize: 11, letterSpacing: 1.8, color: ControllerScreen._muted, fontWeight: FontWeight.w700),
+        style: const TextStyle(
+            fontSize: 11,
+            letterSpacing: 1.8,
+            color: _ControllerScreenState._muted,
+            fontWeight: FontWeight.w700),
       );
 }
 
 class _DirectionButton extends StatelessWidget {
-  const _DirectionButton({required this.icon, required this.label, required this.onPressed});
+  const _DirectionButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
 
   final IconData icon;
   final String label;
@@ -215,14 +452,19 @@ class _DirectionButton extends StatelessWidget {
           style: IconButton.styleFrom(
             foregroundColor: const Color(0xFFDCE9FB),
             backgroundColor: const Color(0xFF1A2B41),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           ),
         ),
       );
 }
 
 class _ActionButton extends StatelessWidget {
-  const _ActionButton({required this.icon, required this.label, required this.onPressed});
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
 
   final IconData icon;
   final String label;
@@ -238,7 +480,8 @@ class _ActionButton extends StatelessWidget {
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFF172942),
             foregroundColor: const Color(0xFFDCE9FB),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
         ),
       );

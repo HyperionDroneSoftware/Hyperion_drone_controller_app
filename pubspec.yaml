@@ -1,14 +1,17 @@
 name: hyperion_drone_controller
-description: Учебное приложение для поэтапного управления дроном Hyperion.
+description: Учебное приложение Android для поэтапного управления дроном Hyperion.
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
-  sdk: '>=3.4.0 <4.0.0'
+  sdk: '>=3.10.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
+  android_intent_plus: ^6.1.0
+  network_info_plus: ^8.2.2
+  permission_handler: ^13.0.2
 
 dev_dependencies:
   flutter_test:
