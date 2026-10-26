@@ -13,13 +13,15 @@
 
 ## Сборка APK
 
-Нужны Flutter 3.38.1 или новее, Android SDK и JDK 17. В корне проекта выполните:
+Нужны Flutter 3.38.1 или новее, Android SDK и JDK 17. Для локального запуска и сборки в корне проекта выполните:
 
+```bash
 flutter pub get
 flutter run
 flutter build apk --release
+```
 
-APK создаётся по пути build/app/outputs/flutter-apk/app-release.apk.
+Готовый APK появится по пути `build/app/outputs/flutter-apk/app-release.apk`. GitHub Actions также собирает APK после каждого push в `main`; его можно скачать из раздела Actions как артефакт `hyperion-drone-controller-apk`.
 
 ## Этапы
 
