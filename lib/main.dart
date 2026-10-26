@@ -369,7 +369,7 @@ class _WifiCard extends StatelessWidget {
               Expanded(
                 child: FilledButton.icon(
                   onPressed: checking ? null : onConnect,
-                  icon: const Icon(Icons.settings_wifi_rounded, size: 18),
+                  icon: const Icon(Icons.settings_rounded, size: 18),
                   label: Text(connected ? 'Сменить сеть' : 'Подключить Wi-Fi'),
                 ),
               ),
