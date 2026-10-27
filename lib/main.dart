@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'drone_link_service.dart';
+
 void main() => runApp(const HyperionApp());
 
 class HyperionApp extends StatelessWidget {
@@ -36,6 +38,7 @@ class ControllerScreen extends StatefulWidget {
 class _ControllerScreenState extends State<ControllerScreen>
     with WidgetsBindingObserver {
   static const _muted = Color(0xFF9BAAC0);
+  final _droneLink = DroneLinkService();
 
   String? _wifiName;
   String? _gateway;
@@ -52,6 +55,7 @@ class _ControllerScreenState extends State<ControllerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _droneLink.dispose();
     super.dispose();
   }
 
@@ -115,6 +119,7 @@ class _ControllerScreenState extends State<ControllerScreen>
     if (!await _requestWifiPermission()) return;
     if (!mounted) return;
 
+    await _droneLink.disconnect();
     setState(() {
       _waitingForSettings = true;
       _wifiMessage = null;
@@ -130,6 +135,19 @@ class _ControllerScreenState extends State<ControllerScreen>
         _wifiMessage = 'Не получилось открыть настройки Wi-Fi на этом устройстве.';
       });
     }
+  }
+
+  Future<void> _checkDrone() async {
+    if (_wifiName == null) {
+      await _openWifiSettings();
+      return;
+    }
+    final gateway = _gateway;
+    if (gateway == null || gateway.isEmpty || gateway == '0.0.0.0') {
+      setState(() => _wifiMessage = 'Android не сообщил адрес шлюза Wi-Fi.');
+      return;
+    }
+    await _droneLink.check(gateway, ssid: _wifiName);
   }
 
   void _showDemoMessage(String command) {
@@ -182,17 +200,23 @@ class _ControllerScreenState extends State<ControllerScreen>
                           ],
                         ),
                       ),
-                      const Text('v0.2', style: TextStyle(color: _muted, fontSize: 12)),
+                      const Text('v0.3', style: TextStyle(color: _muted, fontSize: 12)),
                     ],
                   ),
                   const SizedBox(height: 28),
-                  _WifiCard(
-                    name: _wifiName,
-                    gateway: _gateway,
-                    checking: _checkingWifi,
-                    message: _wifiMessage,
-                    onConnect: _openWifiSettings,
-                    onRefresh: _readWifiInfo,
+                  AnimatedBuilder(
+                    animation: _droneLink,
+                    builder: (context, _) => _WifiCard(
+                      name: _wifiName,
+                      gateway: _gateway,
+                      checking: _checkingWifi,
+                      message: _wifiMessage,
+                      linkState: _droneLink.state,
+                      linkMessage: _droneLink.message,
+                      onConnect: _checkDrone,
+                      onSettings: _openWifiSettings,
+                      onRefresh: _readWifiInfo,
+                    ),
                   ),
                   const SizedBox(height: 14),
                   const _Panel(
@@ -205,7 +229,7 @@ class _ControllerScreenState extends State<ControllerScreen>
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Версия 0.2 проверяет подключение телефона к Wi-Fi сети. Управление моторами пока не включено.',
+                            'Версия 0.3 проверяет UDP связь с дроном. Команды полёта и запуска моторов пока не отправляются.',
                             style: TextStyle(
                                 color: Color(0xFFD3E3FA),
                                 fontSize: 12,
@@ -285,7 +309,7 @@ class _ControllerScreenState extends State<ControllerScreen>
                   const SizedBox(height: 24),
                   const Center(
                     child: Text(
-                      'СНАЧАЛА ПОДКЛЮЧИТЕСЬ К СЕТИ ДРОНА',
+                      'МОТОРЫ НЕ ЗАПУСКАЮТСЯ В ЭТОЙ ВЕРСИИ',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                           fontSize: 10, letterSpacing: 1.1, color: _muted),
@@ -305,7 +329,10 @@ class _WifiCard extends StatelessWidget {
     required this.gateway,
     required this.checking,
     required this.message,
+    required this.linkState,
+    required this.linkMessage,
     required this.onConnect,
+    required this.onSettings,
     required this.onRefresh,
   });
 
@@ -313,12 +340,27 @@ class _WifiCard extends StatelessWidget {
   final String? gateway;
   final bool checking;
   final String? message;
+  final DroneLinkState linkState;
+  final String linkMessage;
   final VoidCallback onConnect;
+  final VoidCallback onSettings;
   final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
     final connected = name != null;
+    final linkColor = switch (linkState) {
+      DroneLinkState.answered => const Color(0xFF62D69A),
+      DroneLinkState.connecting => const Color(0xFF74AAFF),
+      DroneLinkState.silent => const Color(0xFFFFB454),
+      DroneLinkState.idle => const Color(0xFF9BAAC0),
+    };
+    final linkLabel = switch (linkState) {
+      DroneLinkState.answered => 'Связь подтверждена',
+      DroneLinkState.connecting => 'Проверка связи…',
+      DroneLinkState.silent => 'Дрон не ответил',
+      DroneLinkState.idle => 'Связь не проверена',
+    };
     return _Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -357,6 +399,30 @@ class _WifiCard extends StatelessWidget {
             Text('Шлюз: $gateway',
                 style: const TextStyle(color: Color(0xFF9BAAC0), fontSize: 12)),
           ],
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(
+                linkState == DroneLinkState.answered
+                    ? Icons.link_rounded
+                    : Icons.link_off_rounded,
+                color: linkColor,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(linkLabel,
+                    style: TextStyle(
+                        color: linkColor,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(linkMessage,
+              style: const TextStyle(
+                  color: Color(0xFF9BAAC0), fontSize: 11, height: 1.4)),
           if (message != null) ...[
             const SizedBox(height: 10),
             Text(message!,
@@ -368,9 +434,11 @@ class _WifiCard extends StatelessWidget {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: checking ? null : onConnect,
-                  icon: const Icon(Icons.settings_rounded, size: 18),
-                  label: Text(connected ? 'Сменить сеть' : 'Подключить Wi-Fi'),
+                  onPressed: checking || linkState == DroneLinkState.connecting
+                      ? null
+                      : onConnect,
+                  icon: const Icon(Icons.cable_rounded, size: 18),
+                  label: Text(connected ? 'Проверить связь' : 'Выбрать Wi-Fi'),
                 ),
               ),
               const SizedBox(width: 10),
@@ -381,10 +449,13 @@ class _WifiCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          const Text(
-            'В настройках Android выберите сеть дрона, затем вернитесь сюда.',
-            style: TextStyle(color: Color(0xFF9BAAC0), fontSize: 11, height: 1.4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: checking ? null : onSettings,
+              icon: const Icon(Icons.settings_rounded, size: 16),
+              label: const Text('Открыть настройки Wi-Fi'),
+            ),
           ),
         ],
       ),
