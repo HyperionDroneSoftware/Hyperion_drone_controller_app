@@ -200,7 +200,7 @@ class _ControllerScreenState extends State<ControllerScreen>
                           ],
                         ),
                       ),
-                      const Text('v0.3', style: TextStyle(color: _muted, fontSize: 12)),
+                      const Text('v0.4', style: TextStyle(color: _muted, fontSize: 12)),
                     ],
                   ),
                   const SizedBox(height: 28),
@@ -213,6 +213,8 @@ class _ControllerScreenState extends State<ControllerScreen>
                       message: _wifiMessage,
                       linkState: _droneLink.state,
                       linkMessage: _droneLink.message,
+                      responseTime: _droneLink.responseTime,
+                      lastResponseAt: _droneLink.lastResponseAt,
                       onConnect: _checkDrone,
                       onSettings: _openWifiSettings,
                       onRefresh: _readWifiInfo,
@@ -229,7 +231,7 @@ class _ControllerScreenState extends State<ControllerScreen>
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Версия 0.3 проверяет UDP связь с дроном. Команды полёта и запуска моторов пока не отправляются.',
+                            'Версия 0.4 показывает задержку ответа и следит, не пропала ли подтверждённая связь. Команды полёта и запуска моторов пока не отправляются.',
                             style: TextStyle(
                                 color: Color(0xFFD3E3FA),
                                 fontSize: 12,
@@ -331,6 +333,8 @@ class _WifiCard extends StatelessWidget {
     required this.message,
     required this.linkState,
     required this.linkMessage,
+    required this.responseTime,
+    required this.lastResponseAt,
     required this.onConnect,
     required this.onSettings,
     required this.onRefresh,
@@ -342,6 +346,8 @@ class _WifiCard extends StatelessWidget {
   final String? message;
   final DroneLinkState linkState;
   final String linkMessage;
+  final Duration? responseTime;
+  final DateTime? lastResponseAt;
   final VoidCallback onConnect;
   final VoidCallback onSettings;
   final VoidCallback onRefresh;
@@ -423,6 +429,24 @@ class _WifiCard extends StatelessWidget {
           Text(linkMessage,
               style: const TextStyle(
                   color: Color(0xFF9BAAC0), fontSize: 11, height: 1.4)),
+          if (lastResponseAt != null) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 14,
+              runSpacing: 4,
+              children: [
+                if (responseTime != null)
+                  _LinkDetail(
+                    icon: Icons.timer_outlined,
+                    text: 'Задержка ${responseTime!.inMilliseconds} мс',
+                  ),
+                _LinkDetail(
+                  icon: Icons.access_time_rounded,
+                  text: 'Ответ ${_formatResponseTime(lastResponseAt!)}',
+                ),
+              ],
+            ),
+          ],
           if (message != null) ...[
             const SizedBox(height: 10),
             Text(message!,
@@ -461,6 +485,32 @@ class _WifiCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatResponseTime(DateTime value) {
+  final time = value.toLocal();
+  final hour = time.hour.toString().padLeft(2, '0');
+  final minute = time.minute.toString().padLeft(2, '0');
+  final second = time.second.toString().padLeft(2, '0');
+  return '$hour:$minute:$second';
+}
+
+class _LinkDetail extends StatelessWidget {
+  const _LinkDetail({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: const Color(0xFF9BAAC0), size: 13),
+          const SizedBox(width: 4),
+          Text(text,
+              style: const TextStyle(color: Color(0xFF9BAAC0), fontSize: 10)),
+        ],
+      );
 }
 
 class _Panel extends StatelessWidget {

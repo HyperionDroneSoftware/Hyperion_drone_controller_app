@@ -20,13 +20,20 @@ class DroneLinkService extends ChangeNotifier {
   StreamSubscription<RawSocketEvent>? _subscription;
   InternetAddress? _address;
   Timer? _keepAlive;
+  Timer? _watchdog;
   DroneLinkState _state = DroneLinkState.idle;
   String _message = 'Связь с дроном не проверена';
+  DateTime? _lastProbeAt;
+  DateTime? _lastResponseAt;
+  Duration? _responseTime;
   bool _boundToWifi = false;
   bool _wifi8k = false;
+  bool _monitoring = false;
 
   DroneLinkState get state => _state;
   String get message => _message;
+  DateTime? get lastResponseAt => _lastResponseAt;
+  Duration? get responseTime => _responseTime;
 
   Future<void> check(String host, {String? ssid}) async {
     await disconnect();
@@ -64,18 +71,41 @@ class DroneLinkService extends ChangeNotifier {
         if (datagram == null || datagram.address.address != address.address) {
           return;
         }
-        if (!reply.isCompleted) reply.complete(datagram.data);
+        _recordResponse();
+        if (!reply.isCompleted) {
+          reply.complete(datagram.data);
+        } else if (_monitoring && _state == DroneLinkState.silent) {
+          _setState(
+            DroneLinkState.answered,
+            'Ответ от дрона восстановился; мониторинг связи продолжается.',
+          );
+        }
       });
 
       for (var attempt = 0; attempt < 12 && !reply.isCompleted; attempt++) {
-        _send(_heartbeat, 7099);
+        _sendProbe();
         await Future<void>.delayed(const Duration(milliseconds: 120));
       }
 
       if (reply.isCompleted) {
         final response = await reply.future;
         final deviceId = response.isEmpty ? null : response.first;
-        _startHeartbeat(1000, _heartbeat, 7099);
+        _monitoring = true;
+        _startHeartbeat(1000, _heartbeat, 7099, expectReply: true);
+        _watchdog?.cancel();
+        _watchdog = Timer.periodic(const Duration(seconds: 1), (_) {
+          final lastResponse = _lastResponseAt;
+          if (_monitoring &&
+              lastResponse != null &&
+              DateTime.now().difference(lastResponse) >
+                  const Duration(seconds: 4) &&
+              _state == DroneLinkState.answered) {
+            _setState(
+              DroneLinkState.silent,
+              'Нет ответа больше 4 секунд. Проверьте Wi-Fi и повторите проверку.',
+            );
+          }
+        });
         _setState(
           DroneLinkState.answered,
           deviceId == null
@@ -132,17 +162,41 @@ class DroneLinkService extends ChangeNotifier {
     socket.send(bytes, address, port);
   }
 
-  void _startHeartbeat(int milliseconds, Uint8List packet, int port) {
+  void _sendProbe() {
+    _lastProbeAt = DateTime.now();
+    _send(_heartbeat, 7099);
+  }
+
+  void _recordResponse() {
+    final probeAt = _lastProbeAt;
+    if (probeAt != null) {
+      _responseTime = DateTime.now().difference(probeAt);
+    }
+    _lastResponseAt = DateTime.now();
+    notifyListeners();
+  }
+
+  void _startHeartbeat(int milliseconds, Uint8List packet, int port,
+      {bool expectReply = false}) {
     _keepAlive?.cancel();
     _keepAlive = Timer.periodic(
       Duration(milliseconds: milliseconds),
-      (_) => _send(packet, port),
+      (_) {
+        if (expectReply) {
+          _sendProbe();
+        } else {
+          _send(packet, port);
+        }
+      },
     );
   }
 
   Future<void> disconnect() async {
     _keepAlive?.cancel();
     _keepAlive = null;
+    _watchdog?.cancel();
+    _watchdog = null;
+    _monitoring = false;
     if (_wifi8k) _send(_exitWifiMode, 8080);
     _wifi8k = false;
     await _subscription?.cancel();
@@ -162,6 +216,9 @@ class DroneLinkService extends ChangeNotifier {
     _boundToWifi = false;
     _state = DroneLinkState.idle;
     _message = 'Связь с дроном не проверена';
+    _lastProbeAt = null;
+    _lastResponseAt = null;
+    _responseTime = null;
     notifyListeners();
   }
 
@@ -174,6 +231,7 @@ class DroneLinkService extends ChangeNotifier {
   @override
   void dispose() {
     _keepAlive?.cancel();
+    _watchdog?.cancel();
     if (_wifi8k) _send(_exitWifiMode, 8080);
     _subscription?.cancel();
     _socket?.close();
