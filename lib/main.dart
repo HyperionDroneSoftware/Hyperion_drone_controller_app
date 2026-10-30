@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/material.dart';
 import 'package:network_info_plus/network_info_plus.dart';
@@ -61,6 +63,11 @@ class _ControllerScreenState extends State<ControllerScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused && _droneLink.isSessionActive) {
+      unawaited(_droneLink.disconnect(
+        message: 'Сессия остановлена при сворачивании приложения. Проверьте связь повторно.',
+      ));
+    }
     if (state == AppLifecycleState.resumed && _waitingForSettings) {
       _waitingForSettings = false;
       _readWifiInfo();
@@ -200,7 +207,7 @@ class _ControllerScreenState extends State<ControllerScreen>
                           ],
                         ),
                       ),
-                      const Text('v0.4', style: TextStyle(color: _muted, fontSize: 12)),
+                      const Text('v0.5', style: TextStyle(color: _muted, fontSize: 12)),
                     ],
                   ),
                   const SizedBox(height: 28),
@@ -215,7 +222,11 @@ class _ControllerScreenState extends State<ControllerScreen>
                       linkMessage: _droneLink.message,
                       responseTime: _droneLink.responseTime,
                       lastResponseAt: _droneLink.lastResponseAt,
+                      sessionActive: _droneLink.isSessionActive,
                       onConnect: _checkDrone,
+                      onDisconnect: () => _droneLink.disconnect(
+                        message: 'Сессия связи остановлена.',
+                      ),
                       onSettings: _openWifiSettings,
                       onRefresh: _readWifiInfo,
                     ),
@@ -231,7 +242,7 @@ class _ControllerScreenState extends State<ControllerScreen>
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Версия 0.4 показывает задержку ответа и следит, не пропала ли подтверждённая связь. Команды полёта и запуска моторов пока не отправляются.',
+                            'Версия 0.5 следит за связью и останавливает сессию при сворачивании приложения. Команды полёта и запуска моторов пока не отправляются.',
                             style: TextStyle(
                                 color: Color(0xFFD3E3FA),
                                 fontSize: 12,
@@ -335,7 +346,9 @@ class _WifiCard extends StatelessWidget {
     required this.linkMessage,
     required this.responseTime,
     required this.lastResponseAt,
+    required this.sessionActive,
     required this.onConnect,
+    required this.onDisconnect,
     required this.onSettings,
     required this.onRefresh,
   });
@@ -348,7 +361,9 @@ class _WifiCard extends StatelessWidget {
   final String linkMessage;
   final Duration? responseTime;
   final DateTime? lastResponseAt;
+  final bool sessionActive;
   final VoidCallback onConnect;
+  final VoidCallback onDisconnect;
   final VoidCallback onSettings;
   final VoidCallback onRefresh;
 
@@ -445,6 +460,19 @@ class _WifiCard extends StatelessWidget {
                   text: 'Ответ ${_formatResponseTime(lastResponseAt!)}',
                 ),
               ],
+            ),
+          ],
+          if (sessionActive) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: onDisconnect,
+              icon: const Icon(Icons.link_off_rounded, size: 17),
+              label: const Text('Отключить дрон'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFFFB454),
+                side: const BorderSide(color: Color(0x66FFB454)),
+                alignment: Alignment.centerLeft,
+              ),
             ),
           ],
           if (message != null) ...[

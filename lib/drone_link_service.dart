@@ -29,14 +29,18 @@ class DroneLinkService extends ChangeNotifier {
   bool _boundToWifi = false;
   bool _wifi8k = false;
   bool _monitoring = false;
+  int _generation = 0;
 
   DroneLinkState get state => _state;
   String get message => _message;
   DateTime? get lastResponseAt => _lastResponseAt;
   Duration? get responseTime => _responseTime;
+  bool get isSessionActive =>
+      _state == DroneLinkState.connecting || _socket != null || _boundToWifi;
 
   Future<void> check(String host, {String? ssid}) async {
     await disconnect();
+    final generation = ++_generation;
     _setState(DroneLinkState.connecting, 'Закрепляю приложение за Wi-Fi…');
 
     final address = InternetAddress.tryParse(host);
@@ -51,6 +55,11 @@ class DroneLinkService extends ChangeNotifier {
       _boundToWifi = false;
     } on MissingPluginException {
       _boundToWifi = false;
+    }
+
+    if (generation != _generation) {
+      await disconnect();
+      return;
     }
 
     if (!_boundToWifi) {
@@ -85,7 +94,10 @@ class DroneLinkService extends ChangeNotifier {
       for (var attempt = 0; attempt < 12 && !reply.isCompleted; attempt++) {
         _sendProbe();
         await Future<void>.delayed(const Duration(milliseconds: 120));
+        if (generation != _generation) return;
       }
+
+      if (generation != _generation) return;
 
       if (reply.isCompleted) {
         final response = await reply.future;
@@ -143,6 +155,7 @@ class DroneLinkService extends ChangeNotifier {
       for (var attempt = 0; attempt < 6; attempt++) {
         _send(_enterWifiMode, 8080);
         await Future<void>.delayed(const Duration(milliseconds: 80));
+        if (generation != _generation) return;
       }
       _startHeartbeat(790, _wifi8kKeepAlive, 8090);
       _setState(
@@ -150,6 +163,7 @@ class DroneLinkService extends ChangeNotifier {
         'Ответа нет. Для E88 отправлен запрос переключения в Wi-Fi режим; связь пока не подтверждена.',
       );
     } on SocketException catch (error) {
+      if (generation != _generation) return;
       await disconnect();
       _setState(DroneLinkState.idle, 'Ошибка UDP соединения: ${error.message}');
     }
@@ -191,7 +205,8 @@ class DroneLinkService extends ChangeNotifier {
     );
   }
 
-  Future<void> disconnect() async {
+  Future<void> disconnect({String? message}) async {
+    _generation++;
     _keepAlive?.cancel();
     _keepAlive = null;
     _watchdog?.cancel();
@@ -215,7 +230,7 @@ class DroneLinkService extends ChangeNotifier {
     }
     _boundToWifi = false;
     _state = DroneLinkState.idle;
-    _message = 'Связь с дроном не проверена';
+    _message = message ?? 'Связь с дроном не проверена';
     _lastProbeAt = null;
     _lastResponseAt = null;
     _responseTime = null;
