@@ -47,6 +47,9 @@ class _ControllerScreenState extends State<ControllerScreen>
   bool _checkingWifi = false;
   bool _waitingForSettings = false;
   String? _wifiMessage;
+  int _selectedMotor = 1;
+  double _motorDemoPower = 15;
+  bool _motorDemoRunning = false;
 
   @override
   void initState() {
@@ -63,10 +66,13 @@ class _ControllerScreenState extends State<ControllerScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused && _droneLink.isSessionActive) {
-      unawaited(_droneLink.disconnect(
-        message: 'Сессия остановлена при сворачивании приложения. Проверьте связь повторно.',
-      ));
+    if (state == AppLifecycleState.paused) {
+      _stopMotorDemo();
+      if (_droneLink.isSessionActive) {
+        unawaited(_droneLink.disconnect(
+          message: 'Сессия остановлена при сворачивании приложения. Проверьте связь повторно.',
+        ));
+      }
     }
     if (state == AppLifecycleState.resumed && _waitingForSettings) {
       _waitingForSettings = false;
@@ -126,6 +132,7 @@ class _ControllerScreenState extends State<ControllerScreen>
     if (!await _requestWifiPermission()) return;
     if (!mounted) return;
 
+    _stopMotorDemo();
     await _droneLink.disconnect();
     setState(() {
       _waitingForSettings = true;
@@ -145,6 +152,7 @@ class _ControllerScreenState extends State<ControllerScreen>
   }
 
   Future<void> _checkDrone() async {
+    _stopMotorDemo();
     if (_wifiName == null) {
       await _openWifiSettings();
       return;
@@ -155,6 +163,19 @@ class _ControllerScreenState extends State<ControllerScreen>
       return;
     }
     await _droneLink.check(gateway, ssid: _wifiName);
+  }
+
+  void _startMotorDemo() => setState(() => _motorDemoRunning = true);
+
+  void _stopMotorDemo() {
+    if (_motorDemoRunning && mounted) {
+      setState(() => _motorDemoRunning = false);
+    }
+  }
+
+  Future<void> _disconnectDrone() async {
+    _stopMotorDemo();
+    await _droneLink.disconnect(message: 'Сессия связи остановлена.');
   }
 
   void _showDemoMessage(String command) {
@@ -207,7 +228,7 @@ class _ControllerScreenState extends State<ControllerScreen>
                           ],
                         ),
                       ),
-                      const Text('v0.5', style: TextStyle(color: _muted, fontSize: 12)),
+                      const Text('v0.6', style: TextStyle(color: _muted, fontSize: 12)),
                     ],
                   ),
                   const SizedBox(height: 28),
@@ -224,9 +245,7 @@ class _ControllerScreenState extends State<ControllerScreen>
                       lastResponseAt: _droneLink.lastResponseAt,
                       sessionActive: _droneLink.isSessionActive,
                       onConnect: _checkDrone,
-                      onDisconnect: () => _droneLink.disconnect(
-                        message: 'Сессия связи остановлена.',
-                      ),
+                      onDisconnect: _disconnectDrone,
                       onSettings: _openWifiSettings,
                       onRefresh: _readWifiInfo,
                     ),
@@ -242,7 +261,7 @@ class _ControllerScreenState extends State<ControllerScreen>
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Версия 0.5 следит за связью и останавливает сессию при сворачивании приложения. Команды полёта и запуска моторов пока не отправляются.',
+                            'Версия 0.6 добавляет макет теста одного мотора. Это симуляция интерфейса: реальные команды дрону не отправляются.',
                             style: TextStyle(
                                 color: Color(0xFFD3E3FA),
                                 fontSize: 12,
@@ -319,19 +338,153 @@ class _ControllerScreenState extends State<ControllerScreen>
                       ),
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  const Center(
-                    child: Text(
-                      'МОТОРЫ НЕ ЗАПУСКАЮТСЯ В ЭТОЙ ВЕРСИИ',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          fontSize: 10, letterSpacing: 1.1, color: _muted),
-                    ),
+                  const SizedBox(height: 26),
+                  const _SectionLabel('ТЕСТ МОТОРА — ДЕМО'),
+                  const SizedBox(height: 13),
+                  _MotorTestPanel(
+                    selectedMotor: _selectedMotor,
+                    power: _motorDemoPower,
+                    running: _motorDemoRunning,
+                    onSelectMotor: (motor) => setState(() {
+                      _selectedMotor = motor;
+                    }),
+                    onPowerChanged: (power) => setState(() {
+                      _motorDemoPower = power;
+                    }),
+                    onStart: _startMotorDemo,
+                    onStop: _stopMotorDemo,
                   ),
                 ],
               ),
             ),
           ),
+        ),
+      );
+}
+
+class _MotorTestPanel extends StatelessWidget {
+  const _MotorTestPanel({
+    required this.selectedMotor,
+    required this.power,
+    required this.running,
+    required this.onSelectMotor,
+    required this.onPowerChanged,
+    required this.onStart,
+    required this.onStop,
+  });
+
+  final int selectedMotor;
+  final double power;
+  final bool running;
+  final ValueChanged<int> onSelectMotor;
+  final ValueChanged<double> onPowerChanged;
+  final VoidCallback onStart;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) => _Panel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: const Color(0x33FFB454),
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: const Color(0x66FFB454)),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      color: Color(0xFFFFB454), size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'ДЕМО: физический мотор не запускается. Это только симуляция экрана; команды контроллеру не отправляются.',
+                      style: TextStyle(
+                          color: Color(0xFFFFD79F), fontSize: 11, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('Выберите мотор',
+                style: TextStyle(
+                    color: Color(0xFFDCE9FB), fontWeight: FontWeight.w600)),
+            const SizedBox(height: 9),
+            Wrap(
+              spacing: 8,
+              children: List.generate(4, (index) {
+                final motor = index + 1;
+                return ChoiceChip(
+                  label: Text('M$motor'),
+                  selected: selectedMotor == motor,
+                  onSelected: running ? null : (_) => onSelectMotor(motor),
+                );
+              }),
+            ),
+            const SizedBox(height: 11),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Условная мощность',
+                      style: TextStyle(color: Color(0xFFB7C7DC), fontSize: 12)),
+                ),
+                Text('${power.round()}%',
+                    style: const TextStyle(
+                        color: Color(0xFFDCE9FB),
+                        fontWeight: FontWeight.w700)),
+              ],
+            ),
+            Slider(
+              value: power,
+              min: 0,
+              max: 30,
+              divisions: 6,
+              label: '${power.round()}%',
+              onChanged: running ? null : onPowerChanged,
+            ),
+            SizedBox(
+              height: 48,
+              child: FilledButton.icon(
+                onPressed: running ? onStop : onStart,
+                icon: Icon(running ? Icons.stop_rounded : Icons.play_arrow_rounded),
+                label: Text(running ? 'Остановить симуляцию' : 'Запустить симуляцию'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: running
+                      ? const Color(0xFF65353C)
+                      : const Color(0xFF1A2B41),
+                  foregroundColor: const Color(0xFFDCE9FB),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Icon(
+                  running ? Icons.settings_rounded : Icons.settings_outlined,
+                  color: running
+                      ? const Color(0xFF62D69A)
+                      : const Color(0xFF9BAAC0),
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    running
+                        ? 'M$selectedMotor — условно ${power.round()}%, только в демо'
+                        : 'Симуляция выключена',
+                    style: const TextStyle(
+                        color: Color(0xFFB7C7DC), fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       );
 }
